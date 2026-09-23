@@ -126,6 +126,9 @@ router.get('/:circleId/members', requireAuth, param('circleId').isInt(), handleV
 router.patch(
   '/:circleId/members/:membershipId',
   requireAuth,
+  param('circleId').isInt(),
+  param('membershipId').isInt(),
+  handleValidation,
   requireCircleRole(['ADMIN', 'MODERATOR']),
   body('role').isIn(['ADMIN', 'MODERATOR', 'MEMBER']),
   handleValidation,
@@ -144,7 +147,7 @@ router.patch(
   })
 );
 
-router.delete('/:circleId/members/:membershipId', requireAuth, requireCircleRole(['ADMIN', 'MODERATOR']), asyncHandler(async (req, res) => {
+router.delete('/:circleId/members/:membershipId', requireAuth, param('circleId').isInt(), param('membershipId').isInt(), handleValidation, requireCircleRole(['ADMIN', 'MODERATOR']), asyncHandler(async (req, res) => {
   const removed = await pool.query(
     `UPDATE memberships
      SET status = 'REMOVED', updated_at = NOW()
@@ -159,7 +162,7 @@ router.delete('/:circleId/members/:membershipId', requireAuth, requireCircleRole
   sendSuccess(res, null, 'Member removed');
 }));
 
-router.get('/:circleId/join-requests', requireAuth, requireCircleRole(['ADMIN', 'MODERATOR']), asyncHandler(async (req, res) => {
+router.get('/:circleId/join-requests', requireAuth, param('circleId').isInt(), handleValidation, requireCircleRole(['ADMIN', 'MODERATOR']), asyncHandler(async (req, res) => {
   const requests = await pool.query(
     `SELECT jr.id, jr.status, jr.created_at, u.id AS user_id, u.name, u.email
      FROM join_requests jr
@@ -174,6 +177,9 @@ router.get('/:circleId/join-requests', requireAuth, requireCircleRole(['ADMIN', 
 router.patch(
   '/:circleId/join-requests/:requestId',
   requireAuth,
+  param('circleId').isInt(),
+  param('requestId').isInt(),
+  handleValidation,
   requireCircleRole(['ADMIN', 'MODERATOR']),
   body('status').isIn(['APPROVED', 'REJECTED']),
   handleValidation,
@@ -214,7 +220,7 @@ router.patch(
   })
 );
 
-router.get('/:circleId/tasks', requireAuth, requireCircleRole(), asyncHandler(async (req, res) => {
+router.get('/:circleId/tasks', requireAuth, param('circleId').isInt(), handleValidation, requireCircleRole(), asyncHandler(async (req, res) => {
   const tasks = await pool.query(
     `SELECT t.*, u.name AS assignee_name
      FROM tasks t
@@ -229,6 +235,8 @@ router.get('/:circleId/tasks', requireAuth, requireCircleRole(), asyncHandler(as
 router.post(
   '/:circleId/tasks',
   requireAuth,
+  param('circleId').isInt(),
+  handleValidation,
   requireCircleRole(['ADMIN', 'MODERATOR']),
   body('title').isString().trim().isLength({ min: 2, max: 200 }),
   body('priority').isIn(['LOW', 'MEDIUM', 'HIGH']),
@@ -236,37 +244,63 @@ router.post(
   body('assigned_to').optional().isInt(),
   handleValidation,
   asyncHandler(async (req, res) => {
-    const created = await pool.query(
-      `INSERT INTO tasks (circle_id, title, description, priority, status, assigned_to, due_date, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING *`,
-      [
-        req.params.circleId,
-        req.body.title,
-        req.body.description || null,
-        req.body.priority,
-        req.body.status || 'TODO',
-        req.body.assigned_to || null,
-        req.body.due_date || null,
-        req.user.id
-      ]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (req.body.assigned_to) {
-      await pool.query(
-        `INSERT INTO notifications (user_id, task_id, circle_id, type, message)
-         VALUES ($1, $2, $3, 'NEW_TASK', $4)`,
-        [req.body.assigned_to, created.rows[0].id, req.params.circleId, `New task assigned: ${req.body.title}`]
+      if (req.body.assigned_to) {
+        const assigneeMembership = await client.query(
+          `SELECT 1
+           FROM memberships
+           WHERE circle_id = $1 AND user_id = $2 AND status = 'ACTIVE'`,
+          [req.params.circleId, req.body.assigned_to]
+        );
+
+        if (!assigneeMembership.rowCount) {
+          throw new AppError('Assigned user must be an active circle member', 422);
+        }
+      }
+
+      const created = await client.query(
+        `INSERT INTO tasks (circle_id, title, description, priority, status, assigned_to, due_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [
+          req.params.circleId,
+          req.body.title,
+          req.body.description || null,
+          req.body.priority,
+          req.body.status || 'TODO',
+          req.body.assigned_to || null,
+          req.body.due_date || null,
+          req.user.id
+        ]
       );
-    }
 
-    sendSuccess(res, created.rows[0], 'Task created', 201);
+      if (req.body.assigned_to) {
+        await client.query(
+          `INSERT INTO notifications (user_id, task_id, circle_id, type, message)
+           VALUES ($1, $2, $3, 'NEW_TASK', $4)`,
+          [req.body.assigned_to, created.rows[0].id, req.params.circleId, `New task assigned: ${req.body.title}`]
+        );
+      }
+
+      await client.query('COMMIT');
+      sendSuccess(res, created.rows[0], 'Task created', 201);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   })
 );
 
 router.post(
   '/:circleId/tasks/assign-all',
   requireAuth,
+  param('circleId').isInt(),
+  handleValidation,
   requireCircleRole(['ADMIN', 'MODERATOR']),
   body('title').isString().trim().isLength({ min: 2, max: 200 }),
   body('priority').isIn(['LOW', 'MEDIUM', 'HIGH']),

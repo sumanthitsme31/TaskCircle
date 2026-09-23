@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { param } from 'express-validator';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
+import { handleValidation } from '../middleware/errorHandler.js';
 import { sendSuccess } from '../utils/response.js';
 import { asyncHandler } from '../utils/errors.js';
 
@@ -28,7 +30,7 @@ router.get('/unread-count', requireAuth, asyncHandler(async (req, res) => {
   sendSuccess(res, count.rows[0]);
 }));
 
-router.patch('/:notificationId/read', requireAuth, asyncHandler(async (req, res) => {
+router.patch('/:notificationId/read', requireAuth, param('notificationId').isInt(), handleValidation, asyncHandler(async (req, res) => {
   await pool.query(
     `UPDATE notifications
      SET is_read = TRUE, updated_at = NOW()

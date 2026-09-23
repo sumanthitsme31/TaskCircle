@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { body } from 'express-validator';
+import { body, param } from 'express-validator';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { handleValidation } from '../middleware/errorHandler.js';
@@ -37,6 +37,7 @@ router.get('/', requireAuth, asyncHandler(async (req, res) => {
 router.patch(
   '/:taskId',
   requireAuth,
+  param('taskId').isInt(),
   body('status').optional().isIn(['TODO', 'IN_PROGRESS', 'COMPLETED']),
   body('priority').optional().isIn(['LOW', 'MEDIUM', 'HIGH']),
   body('assigned_to').optional().isInt(),
@@ -67,6 +68,19 @@ router.patch(
     const priority = req.body.priority || task.rows[0].priority;
     const assignedTo = req.body.assigned_to ?? task.rows[0].assigned_to;
 
+    if (req.body.assigned_to !== undefined && assignedTo !== null) {
+      const assigneeMembership = await pool.query(
+        `SELECT 1
+         FROM memberships
+         WHERE circle_id = $1 AND user_id = $2 AND status = 'ACTIVE'`,
+        [task.rows[0].circle_id, assignedTo]
+      );
+
+      if (!assigneeMembership.rowCount) {
+        throw new AppError('Assigned user must be an active circle member', 422);
+      }
+    }
+
     const updated = await pool.query(
       `UPDATE tasks
        SET title = $1,
@@ -93,7 +107,7 @@ router.patch(
   })
 );
 
-router.delete('/:taskId', requireAuth, asyncHandler(async (req, res) => {
+router.delete('/:taskId', requireAuth, param('taskId').isInt(), handleValidation, asyncHandler(async (req, res) => {
   const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [req.params.taskId]);
   if (!task.rowCount) {
     throw new AppError('Task not found', 404);
