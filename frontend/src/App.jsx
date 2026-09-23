@@ -45,7 +45,7 @@ export default function App() {
         apiRequest('/api/circles').catch(() => []),
         apiRequest('/api/notifications/unread-count').catch(() => ({ unread_count: 0 }))
       ]);
-      setUser(me);
+      setUser(me.user || me);
       setCircles(circleData);
       setUnreadCount(unread.unread_count || 0);
       setCirclesError('');

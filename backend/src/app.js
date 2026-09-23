@@ -14,6 +14,7 @@ import taskRoutes from './routes/taskRoutes.js';
 import myTaskRoutes from './routes/myTaskRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { csrfMiddleware } from './middleware/csrf.js';
 import { sendSuccess } from './utils/response.js';
 
 const app = express();
@@ -61,6 +62,7 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+app.use(csrfMiddleware);
 
 app.get('/health', (_req, res) => {
   sendSuccess(res, { status: 'ok' });

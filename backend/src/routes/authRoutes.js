@@ -21,7 +21,7 @@ router.get('/failed', (_req, res) => {
 });
 
 router.get('/me', requireAuth, (req, res) => {
-  sendSuccess(res, req.user);
+  sendSuccess(res, { user: req.user, csrfToken: req.session.csrfToken });
 });
 
 router.post('/logout', requireAuth, asyncHandler(async (req, res) => {
